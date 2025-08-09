@@ -4,7 +4,7 @@ var
   clPageControl : TCLPageControl;
   clPageControlContainer : TClPageControlContainer;
   refreshTimer : TCLTimer;
-  Qry : TclSQLQuery;
+  Qry : TclSQLiteQuery;
   renk_listBG, renk_listkart, renk_formBG, renk_P0Y, renk_P0B1, renk_P0G1, renk_P0G2, renk_P0G3, renk_P1G1, renk_P1B1, renk_P2G1, renk_P2G2, renk_grid: String;
   
   //Page0 
@@ -70,26 +70,24 @@ var
 // En çok sipariş veren ilk 10 müşteriyi listeleyen SQL sorgusu
 void SQL_TopMusteriler
 var
-  Qry : TclSQLQuery;
+  Qry : TclSQLiteQuery;
 {
   try
-  {
-    Qry = Clomosy.DBSQLServerQueryWith(
-      'SELECT TOP 10 ' +
-      'Customers.CustomerId AS LblMusteriRecord, ' +
-      'Customers.Name AS LblMusteriAd, ' +
-      'CAST(SUM(OrderItems.Quantity) AS NVARCHAR) + '' sipariş'' AS LblMusteriSiparis ' +
-      'FROM OrderItems ' +
-      'JOIN Orders ON Orders.OrderId = OrderItems.OrderId ' +
-      'JOIN Customers ON Customers.CustomerId = Orders.CustomerId ' +
-      'GROUP BY Customers.CustomerId, Customers.Name ' +
-      'ORDER BY SUM(OrderItems.Quantity) DESC'
-    );
+    Qry =  Clomosy.DBSQLiteQueryWith( 
+    'SELECT 
+    Customers.CustomerId AS LblMusteriRecord,
+    Customers.Name AS LblMusteriAd,
+    SUM(OrderItems.Quantity) || " sipariş" AS LblMusteriSiparis
+    FROM OrderItems
+    JOIN Orders ON Orders.OrderId = OrderItems.OrderId
+    JOIN Customers ON Customers.CustomerId = Orders.CustomerId
+    GROUP BY Customers.CustomerId
+    ORDER BY SUM(OrderItems.Quantity) DESC
+    LIMIT 10');
     
-    Qry.Open;
+    Qry.OpenOrExecute;
     listTopMusteri.clLoadProListViewDataFromDataset(Qry);
     Qry.Free;
-  }
   except
     ShowMessage('SQL Hatası - Exception Class: '+LastExceptionClassName+' Exception Message: '+LastExceptionMessage);
   }
@@ -150,7 +148,7 @@ void P0_TumComboBoxYillariYukle
 var
   yil, sonYil: String;
   i: Integer;
-  Qry : TclSQLQuery;
+  Qry : TclSQLiteQuery;
 {
   // ComboBox'ları oluştur
   cbSatis = MyForm.AddNewComboBox(PnlZamanSatisChart, 'cbSatis');
@@ -158,15 +156,13 @@ var
   cbBolge = MyForm.AddNewComboBox(PnlBolgeAnalizi, 'cbBolge');
 
   try
-  {
     // SQL'den yıl verilerini çek
-    Qry = Clomosy.DBSQLServerQueryWith(
-      'SELECT DISTINCT YEAR(OrderDate) AS Yil ' +
+    Qry = Clomosy.DBSQLiteQueryWith(
+      'SELECT DISTINCT strftime("%Y", OrderDate) AS Yil ' +
       'FROM Orders ' +
       'ORDER BY Yil DESC'
     );
-
-    Qry.Open;
+    Qry.OpenOrExecute;
 
     while (not Qry.Eof)
     {
@@ -192,7 +188,6 @@ var
       if cbBolge.Items.Strings[i] == sonYil
         cbBolge.ItemIndex = i;
     }
-  }
   except
     ShowMessage('Yıl ComboBox ları yüklenirken hata: ' + LastExceptionMessage);
   }
@@ -202,13 +197,12 @@ var
 //Combobox'tan seçilen yıla göre aylara göre toplam satış tutarı grafiği
 void SQL_AylikSatisChart
   var
-  Qry : TclSQLQuery;
+  Qry : TclSQLiteQuery;
   chart : TCLChart;
   lbl : TClProLabel;
   secilenYil : String;
 {
   try
-  {
     // Önce eski chart ve başlık varsa kaldır
     chart = TCLChart(MyForm.FindComponent('zamanSatisChart'));
     if (chart <> nil)
@@ -220,20 +214,21 @@ void SQL_AylikSatisChart
       
     // Seçilen yılı combobox’tan al
     secilenYil = cbSatis.Items[cbSatis.ItemIndex];
-    Qry = Clomosy.DBSQLServerQueryWith(
+    
+    Qry = Clomosy.DBSQLiteQueryWith(
       'SELECT ' +
-      'RIGHT(''0'' + CAST(MONTH(Orders.OrderDate) AS VARCHAR), 2) AS Month, ' +
+      'strftime(''%m'', Orders.OrderDate) AS Month, ' +
       'ROUND(SUM(OrderItems.Quantity * OrderItems.UnitPrice), 2) AS TotalSales ' +
       'FROM Orders ' +
       'JOIN OrderItems ON Orders.OrderId = OrderItems.OrderId ' +
-      'WHERE YEAR(Orders.OrderDate) = ' + secilenYil + ' ' +
-      'GROUP BY MONTH(Orders.OrderDate) ' +
+      'WHERE strftime(''%Y'', Orders.OrderDate) = ''' + secilenYil + ''' ' +
+      'GROUP BY Month ' +
       'ORDER BY Month'
     );
 
-    Qry.Open;
+    Qry.OpenOrExecute;
 
-    if not Qry.IsEmpty
+    if Qry.Found
     {
       //Yeni Chart oluştur
       chart = MyForm.AddNewChart(PnlZamanSatisChart, 'zamanSatisChart', '');
@@ -268,7 +263,6 @@ void SQL_AylikSatisChart
       clRTMethod(cbSatis, 'BringToFront');
     }
     Qry.Free;
-  }
   except
     ShowMessage('SQL_AylikSatisChart hatası: ' + LastExceptionMessage);
   }
@@ -277,13 +271,12 @@ void SQL_AylikSatisChart
 //Combobox'tan seçilen yıla göre en çok sipariş verilen 5 şehrin pasta grafiği
 void SQL_BolgeAnalizi
   var
-  Qry : TclSQLQuery;
+  Qry : TclSQLiteQuery;
   chart : TCLChart;
   lbl : TClProLabel;
   secilenYil : String;
 {
   try
-  {
     // Önce eski chart ve başlık varsa kaldır
     chart = TCLChart(MyForm.FindComponent('bolgeAnalizChart'));
     if (chart <> nil)
@@ -296,40 +289,40 @@ void SQL_BolgeAnalizi
     // Seçilen yılı combobox’tan al
     secilenYil = cbBolge.Items[cbBolge.ItemIndex];
 
-    Qry = Clomosy.DBSQLServerQueryWith(
+    Qry = Clomosy.DBSQLiteQueryWith(
       'SELECT City AS city, sales, ' +
       '  CASE RowNum ' +
-      '    WHEN 1 THEN ''clTomato'' ' +
-      '    WHEN 2 THEN ''clGold'' ' +
-      '    WHEN 3 THEN ''clPeru'' ' +
-      '    WHEN 4 THEN ''clYellow'' ' +
-      '    WHEN 5 THEN ''clPink'' ' +
+      '    WHEN 1 THEN "clTomato" ' +
+      '    WHEN 2 THEN "clGold" ' +
+      '    WHEN 3 THEN "clPeru" ' +
+      '    WHEN 4 THEN "clYellow" ' +
+      '    WHEN 5 THEN "clPink" ' +
       '  END AS color ' +
       'FROM ( ' +
       '  SELECT City, COUNT(*) AS sales, ' +
       '         ROW_NUMBER() OVER (ORDER BY COUNT(*) DESC) AS RowNum ' +
       '  FROM Orders ' +
       '  JOIN Customers ON Customers.CustomerId = Orders.CustomerId ' +
-      '  WHERE YEAR(Orders.OrderDate) = ' + secilenYil + ' ' +
+      '  WHERE strftime("%Y", Orders.OrderDate) = "' + secilenYil + '" ' +
       '  GROUP BY City ' +
-      ') AS TopCities ' +
+      ') ' +
       'WHERE RowNum <= 5 ' +
       'UNION ALL ' +
-      'SELECT ''Diğer'' AS city, COUNT(*) AS sales, ''clwhite'' AS color ' +
+      'SELECT "Diğer" AS city, COUNT(*) AS sales, "clwhite" AS color ' +
       'FROM ( ' +
       '  SELECT City, COUNT(*) AS sales, ' +
       '         ROW_NUMBER() OVER (ORDER BY COUNT(*) DESC) AS RowNum ' +
       '  FROM Orders ' +
       '  JOIN Customers ON Customers.CustomerId = Orders.CustomerId ' +
-      '  WHERE YEAR(Orders.OrderDate) = ' + secilenYil + ' ' +
+      '  WHERE strftime("%Y", Orders.OrderDate) = "' + secilenYil + '" ' +
       '  GROUP BY City ' +
-      ') AS OtherCities ' +
+      ') ' +
       'WHERE RowNum > 5'
     );
 
-    Qry.Open;
+    Qry.OpenOrExecute;
 
-    if not Qry.IsEmpty
+    if Qry.Found
     {
       // Yeni chart oluştur
       chart = MyForm.AddNewChart(PnlBolgeAnalizi, 'bolgeAnalizChart', '');
@@ -361,7 +354,6 @@ void SQL_BolgeAnalizi
       clRTMethod(lbl, 'BringToFront');
       clRTMethod(cbBolge, 'BringToFront');
     }
-  }
     Qry.Free;
   except
     ShowMessage('SQL_BolgeAnaliziChart hatası: ' + LastExceptionMessage);
@@ -370,14 +362,13 @@ void SQL_BolgeAnalizi
 
 //Combobox'tan seçilen yıla göre aylık sipariş sayısı grafiği
 void SQL_ZamanChart
-  var 
+var 
   secilenYil : String;
-  Qry : TclSQLQuery;
+  Qry : TclSQLiteQuery;
   chart : TCLChart;
   lbl : TClProLabel;
 {
   try
-  {
     // Önce varsa eski chart ve başlığı kaldır
     chart = TCLChart(MyForm.FindComponent('zamanChart'));
     if (chart <> nil)
@@ -390,19 +381,19 @@ void SQL_ZamanChart
     secilenYil = cbZaman.Items[cbZaman.ItemIndex];
 
     // Yeni sorguyu hazırla
-    Qry = Clomosy.DBSQLServerQueryWith(
+    Qry = Clomosy.DBSQLiteQueryWith(
       'SELECT ' +
-      'FORMAT(Orders.OrderDate, ''MM'') AS Month, ' +
+      'strftime(''%m'', Orders.OrderDate) AS Month, ' +
       'COUNT(OrderId) AS OrderCount ' +
       'FROM Orders ' +
-      'WHERE YEAR(Orders.OrderDate) = ' + secilenYil + ' ' +
-      'GROUP BY FORMAT(Orders.OrderDate, ''MM'') ' +
+      'WHERE strftime(''%Y'', Orders.OrderDate) = ''' + secilenYil + ''' ' +
+      'GROUP BY Month ' +
       'ORDER BY Month'
     );
 
-    Qry.Open;
+    Qry.OpenOrExecute;
 
-    if not Qry.IsEmpty
+    if Qry.Found
     {
       // Chart ekle
       chart = MyForm.AddNewChart(PnlZamanChart, 'zamanChart', '');
@@ -433,7 +424,6 @@ void SQL_ZamanChart
       clRTMethod(lbl, 'BringToFront');
       clRTMethod(cbZaman, 'BringToFront');
     }
-  }
   except
     ShowMessage('SQL_ZamanChart hatası: ' + LastExceptionMessage);
   }
@@ -442,27 +432,25 @@ void SQL_ZamanChart
 
 //Toplam satış, müşteri, sipariş bilgileri 
 void SQL_P0_OzetBilgiler
-   var
-  Qry : TclSQLQuery;
+var
+  Qry : TclSQLiteQuery;
 {
   try
-  {
-    Qry = Clomosy.DBSQLServerQueryWith(
+    Qry = Clomosy.DBSQLiteQueryWith(
       'SELECT ' +
       'ROUND(SUM(OrderItems.Quantity * OrderItems.UnitPrice), 2) AS ToplamSatis, ' +
       '(SELECT COUNT(*) FROM Orders) AS ToplamSiparis, ' +
       '(SELECT COUNT(DISTINCT CustomerId) FROM Orders) AS ToplamMusteri ' +
       'FROM OrderItems'
     );
-    Qry.Open;
+    Qry.OpenOrExecute;
 
-    if not Qry.IsEmpty
+    if Qry.Found
     {
       LblToplamSatis.Caption = 'Toplam Satış: ₺' + Qry.FieldByName('ToplamSatis').AsString;
       LblToplamSiparis.Caption = 'Toplam Sipariş: ' + Qry.FieldByName('ToplamSiparis').AsString;
       LblToplamMusteri.Caption = 'Toplam Müşteri: ' + Qry.FieldByName('ToplamMusteri').AsString;
     }
-  }
   except
     ShowMessage('SQL Hatası - Exception Class: '+LastExceptionClassName+' Exception Message: '+LastExceptionMessage);
   }
@@ -482,7 +470,7 @@ void P0_OnPageResize;
 
 //Mobil ise ScrollBox masaüstü ise tek panelde görünüm
 void P0_isMobile
-  var
+var
   isMobile : Boolean;
   marginDeger : Integer;
 {
@@ -672,26 +660,24 @@ void Page0
 
 //Tüm müşterler ve yaptıkları alışveriş miktarı
 void SQL_ToplamMusteriler
-  var
-  Qry : TclSQLQuery;
+var
+  Qry : TclSQLiteQuery;
 {
   try
-  {
-    Qry = Clomosy.DBSQLServerQueryWith(
+    Qry = Clomosy.DBSQLiteQueryWith(
       'SELECT ' +
       'Customers.CustomerId AS LblMusteriID, ' +
       'Customers.Name AS LblMusteriAd1, ' +
-      'CAST(SUM(OrderItems.Quantity * OrderItems.UnitPrice) AS NVARCHAR) + '' tl harcama yapıldı.'' AS LblMusteriHarcama ' +
+      'SUM(OrderItems.Quantity * OrderItems.UnitPrice) || " ₺ harcama yapıldı." AS LblMusteriHarcama ' +
       'FROM Orders ' +
       'JOIN OrderItems ON Orders.OrderId = OrderItems.OrderId ' +
       'JOIN Customers ON Customers.CustomerId = Orders.CustomerId ' +
-      'GROUP BY Customers.CustomerId, Customers.Name ' +
+      'GROUP BY Customers.CustomerId ' +
       'ORDER BY SUM(OrderItems.Quantity * OrderItems.UnitPrice) DESC'
     );
 
-    Qry.Open;
+    Qry.OpenOrExecute;
     ListToplamMusteri.clLoadProListViewDataFromDataset(Qry);
-  }
   except
     ShowMessage('SQL Hatası - Exception Class: ' + LastExceptionClassName + ' Exception Message: ' + LastExceptionMessage);
   }
@@ -769,19 +755,19 @@ void P1_CBZaman_YilAta
 var
   yil, sonYil: String;
   i: Integer;
-  Qry : TclSQLQuery;
+  Qry : TclSQLiteQuery;
 {
   cbZamanMusteri = MyForm.AddNewComboBox(PnlPage1Sag, 'cbZamanMusteri');
+  cbZamanMusteri.Margins.Left = 200000;
+  cbZamanMusteri.Margins.Top = 2;
 
   try
-  {
-    Qry = Clomosy.DBSQLServerQueryWith(
-      'SELECT DISTINCT YEAR(OrderDate) AS Yil ' +
+    Qry = Clomosy.DBSQLiteQueryWith(
+      'SELECT DISTINCT strftime("%Y", OrderDate) AS Yil ' +
       'FROM Orders ' +
       'ORDER BY Yil DESC'
     );
-
-    Qry.Open;
+    Qry.OpenOrExecute;
 
     while (not Qry.Eof)
     {
@@ -797,7 +783,6 @@ var
       if cbZamanMusteri.Items.Strings[i] == sonYil
         cbZamanMusteri.ItemIndex = i;
     }
-  }
   except
     ShowMessage('cbZamanMusteri yüklenirken hata: ' + LastExceptionMessage);
   }
@@ -808,29 +793,27 @@ var
 void SQL_P1_OzetBilgiler 
   var 
   secilenYil : String;
-  Qry : TclSQLQuery;
+  Qry : TclSQLiteQuery;
 {
   try
-  {
     secilenYil = cbZamanMusteri.Items[cbZamanMusteri.ItemIndex];
 
-    Qry = Clomosy.DBSQLServerQueryWith(
+    Qry = Clomosy.DBSQLiteQueryWith(
       'SELECT ' +
       'ROUND(SUM(OrderItems.Quantity * OrderItems.UnitPrice) / COUNT(DISTINCT Orders.CustomerId), 2) AS OrtalamaSepet, ' +
       'ROUND(CAST(COUNT(*) AS FLOAT) / COUNT(DISTINCT Orders.CustomerId), 2) AS OrtalamaSiparis ' +
       'FROM Orders ' +
       'JOIN OrderItems ON OrderItems.OrderId = Orders.OrderId ' +
-      'WHERE YEAR(Orders.OrderDate) = ' + secilenYil
+      'WHERE strftime(''%Y'', Orders.OrderDate) = ''' + secilenYil + ''''
     );
 
-    Qry.Open;
+    Qry.OpenOrExecute;
 
-    if not Qry.IsEmpty
+    if Qry.Found
     {
       LblMusteriSepetDeger.Caption = '₺' + Qry.FieldByName('OrtalamaSepet').AsString;
       LblMusteriSiparisDeger.Caption = Qry.FieldByName('OrtalamaSiparis').AsString;
     }
-  }
   except
     ShowMessage('SQL Hatası - Exception Class: ' + LastExceptionClassName + ' Exception Message: ' + LastExceptionMessage);
   }
@@ -840,22 +823,20 @@ void SQL_P1_OzetBilgiler
 void OlusturYillikChart
   var 
   secilenYil : String;
-  Qry : TclSQLQuery;
+  Qry : TclSQLiteQuery;
   LblYillik: TClProLabel;
 {
   try
-  {
-    Qry = Clomosy.DBSQLServerQueryWith(
-      'SELECT YEAR(OrderDate) AS Zaman, ' +
-      'COUNT(DISTINCT CustomerId) AS AktifMusteri ' +
-      'FROM Orders ' +
-      'GROUP BY YEAR(OrderDate) ' +
-      'ORDER BY Zaman'
+    Qry = Clomosy.DBSQLiteQueryWith(
+    'SELECT strftime(''%Y'', OrderDate) AS Zaman, ' +
+    'COUNT(DISTINCT CustomerId) AS AktifMusteri ' +
+    'FROM Orders ' +
+    'GROUP BY Zaman ORDER BY Zaman'
     );
 
-    Qry.Open;
+    Qry.OpenOrExecute;
 
-    if not Qry.IsEmpty
+    if Qry.Found
     {
       zamanMusteriYilChart = MyForm.AddNewChart(PnlZamanMusteriChart, 'zamanMusteriYilChart', '');
       zamanMusteriYilChart.Margins.Left = 5;
@@ -884,7 +865,6 @@ void OlusturYillikChart
 
       clRTMethod(LblYillik, 'BringTofront');
     }
-  }
   except
     ShowMessage('Yıllık Chart hatası: ' + LastExceptionMessage);
   }
@@ -895,25 +875,22 @@ void OlusturYillikChart
 void OlusturAylikChart
   var 
   secilenYil : String;
-  Qry : TclSQLQuery;
+  Qry : TclSQLiteQuery;
   LblAylik : TClProLabel;
 {
   try
-  {
     secilenYil = cbZamanMusteri.Items[cbZamanMusteri.ItemIndex];
 
-    Qry = Clomosy.DBSQLServerQueryWith(
-      'SELECT FORMAT(OrderDate, ''MM'') AS Zaman, ' +
+    Qry = Clomosy.DBSQLiteQueryWith(
+      'SELECT strftime(''%m'', OrderDate) AS Zaman, ' +
       'COUNT(DISTINCT CustomerId) AS AktifMusteri ' +
       'FROM Orders ' +
-      'WHERE YEAR(OrderDate) = ' + secilenYil + ' ' +
-      'GROUP BY FORMAT(OrderDate, ''MM'') ' +
-      'ORDER BY Zaman'
+      'WHERE strftime(''%Y'', OrderDate) = ''' + secilenYil + ''' ' +
+      'GROUP BY Zaman ORDER BY Zaman'
     );
+    Qry.OpenOrExecute;
 
-    Qry.Open;
-
-    if not Qry.IsEmpty
+    if Qry.Found
     {
       zamanMusteriAyChart = MyForm.AddNewChart(PnlZamanMusteriChart, 'zamanMusteriAyChart', '');
       zamanMusteriAyChart.Margins.Left = 5;
@@ -942,7 +919,6 @@ void OlusturAylikChart
 
       clRTMethod(LblAylik,'BringTofront');
     }
-  }
   except
     ShowMessage('Aylık Chart hatası: ' + LastExceptionMessage);
   }
@@ -954,24 +930,21 @@ void OlusturHaftalikChart
   var 
   secilenYil : String;
   LblHaftalik : TClProLabel;
-  Qry : TclSQLQuery;
+  Qry : TclSQLiteQuery;
 {
   try
-  {
     secilenYil = cbZamanMusteri.Items[cbZamanMusteri.ItemIndex];
 
-    Qry = Clomosy.DBSQLServerQueryWith(
-      'SELECT DATEPART(WK, OrderDate) AS Zaman, ' +
+    Qry = Clomosy.DBSQLiteQueryWith(
+      'SELECT strftime(''%W'', OrderDate) AS Zaman, ' +
       'COUNT(DISTINCT CustomerId) AS AktifMusteri ' +
       'FROM Orders ' +
-      'WHERE YEAR(OrderDate) = ' + secilenYil + ' ' +
-      'GROUP BY DATEPART(WK, OrderDate) ' +
-      'ORDER BY Zaman'
+      'WHERE strftime(''%Y'', OrderDate) = ''' + secilenYil + ''' ' +
+      'GROUP BY Zaman ORDER BY Zaman'
     );
-    
-    Qry.Open;
+    Qry.OpenOrExecute;
 
-    if not Qry.IsEmpty
+    if Qry.Found
     {
       zamanMusteriHaftaChart = MyForm.AddNewChart(PnlZamanMusteriChart, 'zamanMusteriHaftaChart', '');
       zamanMusteriHaftaChart.Margins.Left = 5;
@@ -1000,7 +973,6 @@ void OlusturHaftalikChart
 
       clRTMethod(LblHaftalik,'BringTofront');
     }
-  }
   except
     ShowMessage('Haftalık Chart hatası: ' + LastExceptionMessage);
   }
@@ -1090,7 +1062,7 @@ void MusteriForm_SiparisGrid(selectedId : UnicodeString)
 var 
  secim : Integer;
  siralamaKriteri : String;
- Qry : TclSQLQuery;
+ Qry : TclSQLiteQuery;
 {
   if gridMusteriSiparis <> nil
   {
@@ -1131,24 +1103,24 @@ var
         siralamaKriteri = '(OrderItems.Quantity * OrderItems.UnitPrice) DESC';
     }
     
-    Qry = Clomosy.DBSQLServerQueryWith(
+    Qry = Clomosy.DBSQLiteQueryWith(
       'SELECT ' +
-      'Orders.OrderId AS [Sipariş Kodu], ' +
-      'Orders.OrderDate AS [Sipariş Tarihi], ' +
-      'Products.ProductName AS [Ürün], ' +
-      'OrderItems.Quantity AS [Adet], ' +
-      'OrderItems.UnitPrice AS [Birim Fiyat (₺)], ' +
-      'CAST(ROUND(OrderItems.Quantity * OrderItems.UnitPrice, 2) AS NVARCHAR) AS [Toplam Tutar (₺)] ' +
+      'Orders.OrderId AS "Sipariş Kodu", ' +
+      'Orders.OrderDate AS "Sipariş Tarihi", ' +
+      'Products.ProductName AS "Ürün", ' +
+      'OrderItems.Quantity AS "Adet", ' +
+      'OrderItems.UnitPrice AS "Birim Fiyat (₺)", ' +
+      'CAST(ROUND(OrderItems.Quantity * OrderItems.UnitPrice, 2) AS TEXT) AS "Toplam Tutar (₺)" ' +
       'FROM Orders ' +
       'JOIN OrderItems ON Orders.OrderId = OrderItems.OrderId ' +
       'JOIN Products ON Products.ProductId = OrderItems.ProductId ' +
-      'WHERE Orders.CustomerId = ' + selectedId + ' ' +
+      'WHERE Orders.CustomerId = "' + selectedId + '" ' +
       'ORDER BY ' + siralamaKriteri
-    );
+      );
 
-    Qry.Open;
+    Qry.OpenOrExecute;
 
-    if Qry.IsEmpty
+    if (not Qry.Found) 
       ShowMessage('Seçilen müşteriye ait sipariş bulunamadı.');
 
     gridMusteriSiparis.ConnectDataSet(Qry);
@@ -1192,7 +1164,7 @@ void P1_CbGrid_SecenekAta
 //grid üstünde panel bilgileri
 void MusteriForm_PanelBilgi(selectedId : UnicodeString)
 var
-  Qry : TclSQLQuery;
+  Qry : TclSQLiteQuery;
   PnlMusteriBilgiIci : TclProPanel;
   LblMusteriName, LblMusteriCity, LblMusteriRegDate : TClProLabel;
 {
@@ -1209,13 +1181,12 @@ var
   // Şehir ve kayıt tarihi sorgusu 
   try 
   {
-     Qry = Clomosy.DBSQLServerQueryWith(
-      'SELECT City, RegistrationDate FROM Customers WHERE CustomerId = ' + selectedId
-    );
+    Qry = Clomosy.DBSQLiteQueryWith(
+  'SELECT City, RegistrationDate FROM Customers WHERE CustomerId = "' + selectedId + '"');
 
-    Qry.Open;
+    Qry.OpenOrExecute;
 
-    if not Qry.IsEmpty 
+    if Qry.Found 
     {
       PnlMusteriBilgiIci = MusteriForm.AddNewProPanel(PnlMusteriBilgi, 'PnlMusteriBilgiIci');
       PnlMusteriBilgiIci.Align = alLeft;
@@ -1452,7 +1423,7 @@ void Page1
   BtnMusteriLeft.SetclProSettings(BtnMusteriLeft.clProSettings);
   
   BtnMusteriRight = MyForm.AddNewProButton(PnlBtnMusteri, 'BtnMusteriRight', '');
-  BtnMusteriRight.clProSettings.PictureSource ='https://resmim.net/cdn/2025/07/24/XHTrDb.png';
+  BtnMusteriRight.clProSettings.PictureSource ='https://i.postimg.cc/SKGQjmz4/R-GHT-Photoroom.png';
   BtnMusteriRight.Align = alCenter;
   BtnMusteriRight.Margins.Left = 50;
   BtnMusteriRight.Margins.Top = 5;
@@ -1511,7 +1482,7 @@ void Page1
 // Tüm ürünleri ve satış sayıları
 void SQL_ToplamUrunler
 var
-  Qry: TclSQLQuery;
+  Qry: TclSQLiteQuery;
   metin: String;
   filtre: String;
   secimler: TclStringList;
@@ -1527,44 +1498,42 @@ var
   if (chkMamul.IsChecked) 
     secimler.Add('Mamül');
   if (chkYariMamul.IsChecked) 
-    secimler.Add('Yari Mamül');
+    secimler.Add('Yarı Mamül');
   if (chkHammadde.IsChecked) 
     secimler.Add('Hammadde');
   
   if (secimler.Count > 0) 
   {
     metin = '';
+  
     for (i = 0 to secimler.Count - 1) 
     {
       if (i > 0) 
+      {
         metin = metin + ',';
-
-      metin = metin + '''' + secimler.Strings[i] + ''''; // tek tırnak!
+      }
+      metin = metin + '"' + secimler.Strings[i] + '"';
     }
-
+    
     kategoriFiltre = metin;
     filtre = ' WHERE Products.Category IN (' + kategoriFiltre + ')';
   }
-  else
-  {
-    filtre = '';
-  }
-
+  
   try 
   {
-    Qry = Clomosy.DBSQLServerQueryWith(
+    Qry = Clomosy.DBSQLiteQueryWith(
       'SELECT ' +
       'Products.ProductId AS LblUrunRecord, ' +
       'Products.ProductName AS LblUrunAd, ' +
-      'CAST(SUM(OrderItems.Quantity) AS NVARCHAR) + '' adet satıldı.'' AS LblUrunSatis ' +
+      'SUM(OrderItems.Quantity) || " adet satıldı." AS LblUrunSatis ' +
       'FROM OrderItems ' +
       'JOIN Products ON Products.ProductId = OrderItems.ProductId ' +
       filtre + ' ' +
-      'GROUP BY Products.ProductId, Products.ProductName ' +
+      'GROUP BY Products.ProductId ' +
       'ORDER BY SUM(OrderItems.Quantity) DESC'
     );
 
-    Qry.Open;
+    Qry.OpenOrExecute;
     listToplamUrun.clLoadProListViewDataFromDataset(Qry);
     Qry.Free;
   }
@@ -1572,12 +1541,11 @@ var
     ShowMessage('SQL Hatası: ' + LastExceptionMessage);
   }
 }
-
   
 // Tüm ürünleri mevcut stok miktarları
 void SQL_UrunStok
 var
-  Qry: TclSQLQuery;
+  Qry: TclSQLiteQuery;
   metin: String;
   filtre: String;
   secimler: TclStringList;
@@ -1602,34 +1570,30 @@ var
     metin = '';
     for (i = 0 to secimler.Count - 1) 
     {
-      if (i > 0) 
+      if (i > 0)
         metin = metin + ',';
-
-      metin = metin + '''' + secimler.Strings[i] + ''''; // tek tırnak!
+    
+      metin = metin + '"' + secimler.Strings[i] + '"';
     }
 
     kategoriFiltre = metin;
     filtre = ' WHERE Products.Category IN (' + kategoriFiltre + ')';
   }
-  else
-  {
-    filtre = '';
-  }
 
   try 
   {
-    Qry = Clomosy.DBSQLServerQueryWith(
+    Qry = Clomosy.DBSQLiteQueryWith(
       'SELECT ' +
       'Products.ProductId AS LblStokUrunId, ' +
       'Products.ProductName AS LblStokUrunAd, ' +
-      'CAST(Stock.Quantity AS NVARCHAR) + '' adet stokta.'' AS LblStokUrunMiktar ' +
+      'Quantity || " adet stokta." AS LblStokUrunMiktar ' +
       'FROM Stock ' +
       'JOIN Products ON Products.ProductId = Stock.ProductId ' +
       filtre + ' ' +
-      'ORDER BY Stock.Quantity DESC'
+      'ORDER BY Quantity DESC'
     );
 
-    Qry.Open;
+    Qry.OpenOrExecute;
     ListUrunStok.clLoadProListViewDataFromDataset(Qry);
   }
   except
@@ -1764,7 +1728,7 @@ void ListOlustur_UrunStok
 // Yıl bazlı combobox'a veri yükler
 void P2_CBUrun_YilAta
 var
-  Qry : TclSQLQuery;
+  Qry : TclSQLiteQuery;
   yil, sonYil: String;
   i: Integer;
 {
@@ -1774,14 +1738,12 @@ var
   clRTMethod(cbUrunZaman, 'BringToFront');
 
   try
-  {
-    Qry = Clomosy.DBSQLServerQueryWith(
-      'SELECT DISTINCT YEAR(OrderDate) AS Yil ' +
+    Qry = Clomosy.DBSQLiteQueryWith(
+      'SELECT DISTINCT strftime("%Y", OrderDate) AS Yil ' +
       'FROM Orders ' +
       'ORDER BY Yil DESC'
     );
-
-    Qry.Open;
+    Qry.OpenOrExecute;
 
     while (not Qry.Eof)
     {
@@ -1797,7 +1759,7 @@ var
       if cbUrunZaman.Items.Strings[i] == sonYil
         cbUrunZaman.ItemIndex = i;
     }
-  }
+
   except
     ShowMessage('cbUrunZaman yüklenirken hata: ' + LastExceptionMessage);
   }
@@ -1808,74 +1770,45 @@ var
 void SQL_UrunSatisVerisi(UrunId : String)
 var
   secilenYil : String;
-  Qry : TclSQLQuery;
+  Qry : TclSQLiteQuery
 {
   try
-  {
-    // Yıl combobox'ı seçili değilse çık
-    if ((cbUrunZaman == nil) || (cbUrunZaman.Items.Count == 0) || (cbUrunZaman.ItemIndex < 0))
+     if ((cbUrunZaman == nil) || (cbUrunZaman.Items.Count == 0) || (cbUrunZaman.ItemIndex < 0))
       Exit;
 
-    // Ürün ID boşsa çık
-    if (UrunId == '') 
-    {
-      ShowMessage('Ürün ID boş geldi');
-      Exit;
-    }
-
-    // Grafik nesnesi oluşmadıysa çık
-    if (urunZamanChart == nil) 
-    {
-      ShowMessage('Grafik nesnesi bulunamadı.');
-      Exit;
-    }
-
-    // Seçilen yılı al
     secilenYil = cbUrunZaman.Items[cbUrunZaman.ItemIndex];
 
-    // Mod'a göre SQL sorgusunu hazırla
     if aktifModUrun == 'yillik'
-    {
-      Qry = Clomosy.DBSQLServerQueryWith(
-        'SELECT YEAR(Orders.OrderDate) AS Period, SUM(OrderItems.Quantity) AS Total ' +
+      Qry = Clomosy.DBSQLiteQueryWith(
+        'SELECT strftime("%Y", Orders.OrderDate) AS Period, SUM(OrderItems.Quantity) AS Total ' +
         'FROM Orders ' +
         'JOIN OrderItems ON Orders.OrderId = OrderItems.OrderId ' +
-        'WHERE OrderItems.ProductId = ''' + UrunId + ''' ' +
-        'GROUP BY YEAR(Orders.OrderDate) ' +
-        'ORDER BY Period'
+        'WHERE OrderItems.ProductId = "' + UrunId + '" ' +
+        'GROUP BY strftime("%Y", Orders.OrderDate)'
       );
-    }
     else if aktifModUrun == 'aylik'
-    {
-      Qry = Clomosy.DBSQLServerQueryWith(
-        'SELECT FORMAT(Orders.OrderDate, ''MM'') AS Period, SUM(OrderItems.Quantity) AS Total ' +
+      Qry = Clomosy.DBSQLiteQueryWith(
+        'SELECT strftime("%m", Orders.OrderDate) AS Period, SUM(OrderItems.Quantity) AS Total ' +
         'FROM Orders ' +
         'JOIN OrderItems ON Orders.OrderId = OrderItems.OrderId ' +
-        'WHERE OrderItems.ProductId = ''' + UrunId + ''' ' +
-        'AND YEAR(Orders.OrderDate) = ' + secilenYil + ' ' +
-        'GROUP BY FORMAT(Orders.OrderDate, ''MM'') ' +
-        'ORDER BY Period'
+        'WHERE OrderItems.ProductId = "' + UrunId + '" ' +
+        'AND strftime("%Y", Orders.OrderDate) = "' + secilenYil + '" ' + 
+        'GROUP BY strftime("%m", Orders.OrderDate)'
       );
-    }
     else if aktifModUrun == 'haftalik'
-    {
-      Qry = Clomosy.DBSQLServerQueryWith(
-        'SELECT DATEPART(WK, Orders.OrderDate) AS Period, SUM(OrderItems.Quantity) AS Total ' +
+      Qry = Clomosy.DBSQLiteQueryWith(
+        'SELECT strftime("%W", Orders.OrderDate) AS Period, SUM(OrderItems.Quantity) AS Total ' +
         'FROM Orders ' +
         'JOIN OrderItems ON Orders.OrderId = OrderItems.OrderId ' +
-        'WHERE OrderItems.ProductId = ''' + UrunId + ''' ' +
-        'AND YEAR(Orders.OrderDate) = ' + secilenYil + ' ' +
-        'GROUP BY DATEPART(WK, Orders.OrderDate) ' +
-        'ORDER BY Period'
+        'WHERE OrderItems.ProductId = "' + UrunId + '" ' +
+        'AND strftime("%Y", Orders.OrderDate) = "' + secilenYil + '" ' +
+        'GROUP BY strftime("%W", Orders.OrderDate)'
       );
-    }
 
-    // Sorguyu çalıştır
-    Qry.Open;
+    Qry.OpenOrExecute;
 
-    if not Qry.IsEmpty
+    if Qry.Found
     {
-      urunZamanChart.Visible = True;
       urunZamanChart.clLoadDataFromDataSet(Qry);
 
       if aktifModUrun == 'yillik'
@@ -1885,67 +1818,42 @@ var
       else
         LblUrunZamanBaslik.Text = secilenYil + ' Haftalık Sipariş Sayısı';
     }
-    else
-    {
-      ShowMessage('Grafik için veri bulunamadı.');
-    }
-
-    Qry.Free;
-  }
   except
-    ShowMessage('SQL Chart Hatası: ' + LastExceptionMessage);
+    ShowMessage('SQL Chart Hatası - ' + LastExceptionMessage);
   }
+  Qry.Free;
 }
 
+// Seçilen ürünün güncel stok durumunu gösteren grafik
 void SQL_UrunStokVerisi(UrunId: String)
 var
-  Qry : TclSQLQuery;
+  Qry : TclSQLiteQuery;
 {
   try
-  {
-    if (UrunId == '')
-    {
-      ShowMessage('Ürün ID boş geldi.');
-      Exit;
-    }
-
-    if (urunStokChart == nil)
-    {
-      ShowMessage('Stok grafiği tanımlı değil.');
-      Exit;
-    }
-
-    Qry = Clomosy.DBSQLServerQueryWith(
-      'SELECT ''Satılan Ürün'' AS Durum, ' +
-      '(SELECT ISNULL(SUM(OrderItems.Quantity), 0) ' +
-      ' FROM OrderItems WHERE ProductId = ''' + UrunId + ''') AS Adet, ' +
-      '''clwhite'' AS color ' +
-      'UNION ALL ' +
-      'SELECT ''Stokta Kalan'', Quantity, ''clYellowGreen'' ' +
-      'FROM Stock WHERE ProductId = ''' + UrunId + ''' AND Quantity > 0'
+    Qry = Clomosy.DBSQLiteQueryWith(
+    'SELECT "Satılan Ürün" AS Durum, ' +
+    '(SELECT IFNULL(SUM(OrderItems.Quantity), 0) ' +
+    ' FROM OrderItems WHERE ProductId = "' + UrunId + '") AS Adet, ' +
+    '"clwhite" AS color ' +
+    'UNION ALL ' +
+    'SELECT "Stokta Kalan", Quantity, "clYellowGreen" ' +
+    'FROM Stock WHERE ProductId = "' + UrunId + '" AND Quantity > 0'
     );
 
-    Qry.Open;
+    Qry.OpenOrExecute;
 
-    if not Qry.IsEmpty
+    if Qry.Found
     {
       LblUrunStokBaslik.Text = listToplamUrun.clSelectedItemData(clCaption) + ' Ürünü Satış-Stok Sayıları';
-      urunStokChart.Visible = True;
       urunStokChart.Charttype = clCPie;
       urunStokChart.XAxisText = 'Durum';
       urunStokChart.ChartItemsValue = 'Adet';
       urunStokChart.clLoadDataFromDataSet(Qry);
     }
-    else
-    {
-      ShowMessage('Stok verisi bulunamadı.');
-    }
-
-    Qry.Free;
-  }
   except
     ShowMessage('Stok SQL Hatası: ' + LastExceptionMessage);
   }
+  Qry.Free;
 }
 
 
@@ -2367,12 +2275,11 @@ void refreshPages
   MyForm.clSetWindowState(fwsMaximized); // Tam ekran başlat
   MyForm.SetFormColor('#ffffff','#000000',clGCross); // Tema rengi ayarlanıyor
 
-  //Server Bağlantısı
-  Qry = TclSqlQuery.Create(nil);
-  // Clomosy.DBSQLServerConnect(ProviderName, ServerName, UserName, UserPassword, DatabaseName:String; Port:Integer=1433) :
-  Clomosy.DBSQLServerConnect('SQL Server', ' ', ' ', ' ', ' ', 1433);
-  Qry.Connection = Clomosy.DBSQLServerConnection;
-
+  // Veritabanı bağlantısı
+  Clomosy.DBSQLiteConnect(Clomosy.AppFilesPath + 'musteri_analiz.db', '');
+  Qry = TclSQLiteQuery.Create(nil);
+  Qry.Connection = Clomosy.DBSQLiteConnection; 
+  
   // Sayfa kontrol nesnesi 
   clPageControl = MyForm.AddNewPageControl(MyForm,'clPageControl');
   clPageControl.Align = alClient;
@@ -2407,7 +2314,6 @@ void refreshPages
   // Page2 - Ürün Analizi renkleri
   renk_P2G1 = '#008c67'; // Sağ üst: ürün sipariş sayısı
   renk_P2G2 = '#008c67'; // Sağ alt: satış ve stok karşılaştırma
-
 
   // Sayfalar başlatılıyor
   Page0;
